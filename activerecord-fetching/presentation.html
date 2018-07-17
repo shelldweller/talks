@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>ActiveRecord query efficiency</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Improving ActiveRecord Query Efficiency
+
+---
+
+class: center, middle
+# Once there was a survey...
+
+... that ran over 4.5K SQL queries to generate a single page
+
+---
+
+# N + 1: the problem
+
+```ruby
+User.where(name: 'Anne') { |u| puts u.account.name }
+```
+
+# N + 1: the solution
+
+```ruby
+User.includes(:account).where(name: 'Anne') { |u| puts u.account.name }
+```
+
+---
+
+# N + 1: Benchmarking
+
+```ruby
+Benchmark.bmbm do |x|
+  x.report('without includes') do
+    User.limit(1000).map { |u| [u.login, u.account.name] }
+  end
+  x.report('with includes') do
+    User.includes(:account).limit(1000).map { |u| [u.login, u.account.name] }
+  end
+end
+```
+
+```
+Rehearsal ----------------------------------------------------
+without includes   3.080000   2.570000   5.650000 (  5.985046)
+with includes      1.930000   2.000000   3.930000 (  3.966208)
+------------------------------------------- total: 9.580000sec
+
+                       user     system      total        real
+without includes   2.660000   2.310000   4.970000 (  5.181635)
+with includes      1.890000   2.000000   3.890000 (  3.921379)
+```
+
+---
+
+# Sequential queries: the problem
+
+```ruby
+account_ids = Account.where(sales_rep_id: REP_ID).ids
+user_ids = User.where(account_id: account_ids).ids
+CustomerRequest.where(user_id: user_ids)
+```
+
+# Sequential queries: the solution
+
+```ruby
+CustomerRequest.joins(user: :account).where(accounts: { sales_rep_id: REP_ID })
+```
+---
+
+# Sequential queries: Benchmarking
+```ruby
+REP_ID = 6
+
+Benchmark.bmbm do |x|
+  x.report('sequential') do
+    account_ids = Account.where(sales_rep_id: REP_ID).ids
+    user_ids = User.where(account_id: account_ids).ids
+    CustomerRequest.where(user_id: user_ids).count
+  end
+
+  x.report('joins') do
+    CustomerRequest
+      .joins(user: :account)
+      .where(accounts: { sales_rep_id: REP_ID })
+      .count
+  end
+end
+```
+
+---
+
+# Sequential queries: Benchmarking
+
+```
+Rehearsal ----------------------------------------------
+sequential   0.450000   0.150000   0.600000 (  0.923575)
+joins        0.000000   0.000000   0.000000 (  0.724951)
+------------------------------------- total: 0.600000sec
+
+                 user     system      total        real
+sequential   0.200000   0.010000   0.210000 (  0.508704)
+joins        0.000000   0.000000   0.000000 (  0.720693)
+```
+
+---
+
+# Traversal: the problem
+
+```ruby
+customer_request.user.account.sales_rep
+```
+
+Executes:
+```sql
+SELECT `users`.* FROM `users` WHERE `users`.`id` = 1153018 LIMIT 1
+SELECT `accounts`.* FROM `accounts` WHERE `accounts`.`id` = 697964 LIMIT 1
+SELECT `salesforce_users`.* FROM `salesforce_users` WHERE `salesforce_users`.`id` = 2725 LIMIT 1
+```
+
+---
+
+# Traversal: the solution
+
+```ruby
+SalesforceUser
+  .joins(accounts: { users: :customer_requests })
+  .find_by(customer_requests: { id: customer_request.id })
+```
+
+Executes:
+```sql
+SELECT  `salesforce_users`.*
+FROM `salesforce_users`
+INNER JOIN `accounts` ON `accounts`.`sales_rep_id` = `salesforce_users`.`id`
+INNER JOIN `users` ON `users`.`account_id` = `accounts`.`id`
+INNER JOIN `customer_requests` ON `customer_requests`.`user_id` = `users`.`id`
+WHERE `customer_requests`.`id` = 123
+LIMIT 1
+```
+
+---
+
+# Traversal: benchmarking
+
+```ruby
+Benchmark.bmbm do |x|
+  x.report('traversal') do
+    cr = CustomerRequest.find(123)
+    cr.user.account.sales_rep.email
+  end
+
+  x.report('joins') do
+    cr = CustomerRequest.find(123)
+    SalesforceUser
+      .joins(accounts: { users: :customer_requests })
+      .find_by(customer_requests: { id: cr.id })
+  end
+end
+```
+
+---
+
+# Traversal: benchmarking
+
+```
+Rehearsal ---------------------------------------------
+traversal   0.250000   0.110000   0.360000 (  0.385412)
+joins       0.010000   0.010000   0.020000 (  0.015570)
+------------------------------------ total: 0.380000sec
+
+                user     system      total        real
+traversal   0.010000   0.010000   0.020000 (  0.010166)
+joins       0.000000   0.000000   0.000000 (  0.005138)
+```
+
+---
+
+# Overfetching: the problem
+
+```ruby
+puts User.find(123).email_address
+```
+
+# Overfetching: solutions
+```ruby
+# .select
+User.select(:email_address).find(123).email_address
+
+# .pluck
+User.where(id: 123).pluck(:email_address).first
+```
+
+---
+
+# Overfetching: benchmarking (one object)
+
+```ruby
+Benchmark.bmbm do |x|
+  x.report('overfetch') { User.find(123).email_address }
+  x.report('select') { User.select(:email_address).find(123).email_address }
+  x.report('pluck') { User.where(id: 123).pluck(:email_address).first }
+end
+```
+
+```
+Rehearsal ---------------------------------------------
+overfetch   0.370000   0.140000   0.510000 (  0.653394)
+select      0.000000   0.000000   0.000000 (  0.010343)
+pluck       0.000000   0.000000   0.000000 (  0.008681)
+------------------------------------ total: 0.510000sec
+
+                user     system      total        real
+overfetch   0.000000   0.000000   0.000000 (  0.005176)
+select      0.000000   0.000000   0.000000 (  0.001330)
+pluck       0.000000   0.000000   0.000000 (  0.001337)
+```
+
+---
+
+# Overfetching: benchmarking (~1K objects)
+
+```ruby
+Benchmark.bmbm do |x|
+  x.report('overfetch') { User.where(account_id: 670811).map(&:email_address) }
+  x.report('select') { User.select(:email_address).where(account_id: 670811).map(&:email_address) }
+  x.report('pluck') { User.where(account_id: 670811).pluck(:email_address) }
+end
+```
+
+```
+Rehearsal ---------------------------------------------
+overfetch   0.760000   0.770000   1.530000 (  1.553546)
+select      0.010000   0.000000   0.010000 (  0.016373)
+pluck       0.000000   0.000000   0.000000 (  0.007084)
+------------------------------------ total: 1.540000sec
+
+                user     system      total        real
+overfetch   0.720000   0.730000   1.450000 (  1.459212)
+select      0.020000   0.000000   0.020000 (  0.017434)
+pluck       0.000000   0.010000   0.010000 (  0.008032)
+```
+
+---
+
+# Existential problem
+
+````ruby
+User.find_by(id: 123).present?
+```
+
+# Existential solution
+
+```ruby
+User.where(id: 123).exists?
+```
+
+---
+
+# Existential benchmarking (one object)
+```ruby
+Benchmark.bmbm do |x|
+  x.report('full load') { User.find_by(id: 123).present? }
+  x.report('exists?') { User.where(id: 123).exists? }
+end
+```
+
+```
+Rehearsal ---------------------------------------------
+full load   0.190000   0.090000   0.280000 (  0.298353)
+exists?     0.010000   0.000000   0.010000 (  0.002433)
+------------------------------------ total: 0.290000sec
+
+                user     system      total        real
+full load   0.000000   0.000000   0.000000 (  0.006076)
+exists?     0.000000   0.000000   0.000000 (  0.001146)
+```
+
+---
+
+# Existential benchmarking (~1K objects)
+
+```ruby
+Benchmark.bmbm do |x|
+  x.report('full load') { User.where(account_id: 670811).present? }
+  x.report('empty?') { !User.select(:email_address).where(account_id: 670811).empty? }
+  x.report('exists?') { User.where(account_id: 670811).exists? }
+end
+```
+
+```
+Rehearsal ---------------------------------------------
+full load   0.720000   0.730000   1.450000 (  1.454571)
+empty?      0.000000   0.000000   0.000000 (  0.001562)
+exists?     0.000000   0.000000   0.000000 (  0.001157)
+------------------------------------ total: 1.450000sec
+
+                user     system      total        real
+full load   0.720000   0.730000   1.450000 (  1.457974)
+empty?      0.000000   0.000000   0.000000 (  0.001332)
+exists?     0.000000   0.000000   0.000000 (  0.000926)
+```
+
+---
+
+class: center, middle
+# Conclusions
+
+---
+
+# Inefficient queries are a problem of scale:
+
+* one inefficient query is not too bad
+* it gets much worse when dealing with collections
+* or executing ineficient queries in a loop
+
+---
+
+# Prefer doing things in DB rather than in Rails app!
+
+---
+
+# Improving query efficincy is not always straight forwrad.
+
+    </textarea>
+    <script src="https://remarkjs.com/downloads/remark-latest.min.js" type="text/javascript">
+    </script>
+    <script type="text/javascript">
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
