@@ -1,0 +1,9 @@
+digraph Cart {
+  graph [fontsize=10 fontname="Verdana"];
+  node [shape=record fontsize=10 fontname="Verdana"];
+
+  order_items -> orders
+  items -> order_items
+  items -> categories
+  users -> orders
+}

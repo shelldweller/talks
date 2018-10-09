@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>My Awesome Presentation</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.3.1/css/all.css" integrity="sha384-mzrmE5qonljUremFsqc01SB46JvROS7bZs3IO2EmfFsd15uHvIt+Y8vEf7N7fWAU" crossorigin="anonymous">
+    <style type="text/css">
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-slide { text-align: center; }
+      .remark-slide ul { text-align: left; }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+      .remark-code { text-align: left; }
+
+      .fas { color: #36454F; }
+      .secondary { color:  rgb(172, 194, 209); }
+      .light { color: #eeeeee; }
+      .medium { color: #aaaaaa; }
+      .fa-arrow-right { margin: 0 1em; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# NoSQL (and big data)
+
+---
+
+class: center
+
+# Vertical scaling
+
+<i class="fas fa-database"></i>
+<i class="fas fa-arrow-right secondary"></i>
+<i class="fas fa-database" style="font-size: 4em"></i>
+
+---
+
+class: center
+
+# Horizontal scaling
+
+<i class="fas fa-database"></i>
+<i class="fas fa-arrow-right secondary"></i>
+<i class="fas fa-database"></i> + <i class="fas fa-database"></i> + <i class="fas fa-database"></i> + ... + <i class="fas fa-database"></i>
+
+---
+
+class: center
+
+# Sharded cluster
+
+App
+
+<i class="fas fa-arrow-down"></i>
+
+Middleware (config servers)
+
+<i class="fas fa-arrow-down"></i>
+
+<i class="fas fa-database"></i> + <i class="fas fa-database"></i> + <i class="fas fa-database"></i> + ... + <i class="fas fa-database"></i>
+
+---
+
+# Constraints
+
+(Most likely) no autoincrementing int primary key.
+
+Hello `uuid`!
+
+---
+
+# Cardinality
+
+Sharding key cardinality should match the number of nodes in the cluster.
+
+<i class="fas fa-database"></i>
+<i class="fas fa-database light"></i>
+<i class="fas fa-database"></i>
+<i class="fas fa-database"></i>
+
+---
+
+# Key frequency
+
+We want equal probability for each key range (or hash).
+
+(And don't want to shard keys to increase monotonically.)
+
+<i class="fas fa-database"></i>
+<i class="fas fa-database"></i>
+<i class="fas fa-database medium"></i>
+<i class="fas fa-database light"></i>
+
+---
+
+# Query restrictions
+
+To take advantage of sharding, sharding key must be part of the query.
+
+___
+
+App
+
+<i class="fas fa-arrow-down"></i>
+
+Middleware
+
+<i class="fas fa-arrow-down"></i> + <i class="fas fa-arrow-down"></i> + <i class="fas fa-arrow-down"></i> + ... + <i class="fas fa-arrow-down"></i>
+
+<i class="fas fa-database"></i> + <i class="fas fa-database"></i> + <i class="fas fa-database"></i> + ... + <i class="fas fa-database"></i>
+
+
+---
+
+# What about relationships?
+
+.center[![Shopping cart](cart.svg)]
+
+---
+
+# NoSQL is all about embedding
+
+```js
+{
+  _id: "f1e4acc6-2aab-4b98-a9fe-28f78eb0d645",
+  user: {
+    name: "Máximo Afonso",
+    // ...
+  },
+  billingAddress: { /* ... */ }
+  items: [
+    {
+      name: "The Double",
+      categories: ["books", "hardcover"]
+      // ...
+    }
+  ],
+  // ...
+}
+```
+
+---
+
+# Schema type
+
+SQL: relational (collection of tables)
+
+NoSQL: document with embedded fields
+
+---
+
+# Query language
+
+SQL: (pretty) standard
+
+NoSQL: idiosyncratic (each vendor has it's own)
+
+---
+
+# Query structure
+
+SQL: generic (connect anything with foreign keys)
+
+NoSQL: Document structure must match query pattern
+
+---
+
+# Query structure
+
+NoSQL cannot be domain agnostic
+
+User has photos?
+```js
+{
+  user: "Máximo",
+  photos: [
+    {
+      caption: "Me watching TV", tags: []
+    }
+  ]
+}
+```
+
+Or photos belong to user?
+
+```js
+{
+  caption: "Me watching TV",
+  tags: [],
+  user: "Máximo"
+}
+```
+
+---
+
+# Schema design
+
+SQL: domain agnostic
+
+NoSQL: domain specific
+
+---
+
+# Scalability
+
+SQL: limited
+
+NoSQL: virtually unlimited
+
+# <i class="fas fa-space-shuttle"></i>
+
+---
+
+# Other reasons to use NoSQL
+
+* Quick prototyping
+* Persistent document storage
+* Naturally polymorphic data
+* Your document represents your app
+
+---
+
+# NoSQL use case
+
+http://demographi.ca
+
+    </textarea>
+    <script src="https://remarkjs.com/downloads/remark-latest.min.js" type="text/javascript">
+    </script>
+    <script type="text/javascript">
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
